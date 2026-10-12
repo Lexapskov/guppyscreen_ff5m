@@ -107,7 +107,7 @@ void ButtonContainer::handle_callback(lv_event_t *e) {
 }
 
 void ButtonContainer::handle_prompt() {
-  static const char * btns[] = {"Ok", "Cancel/Отмена", ""};
+  static const char * btns[] = {"Ok", "Cancel", ""};
 
   lv_obj_t *mbox1 = lv_msgbox_create(NULL, NULL, prompt_text.c_str(), btns, false);
   lv_obj_t *msg = ((lv_msgbox_t*)mbox1)->text;
