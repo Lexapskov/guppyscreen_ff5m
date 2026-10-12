@@ -16,6 +16,23 @@ static lv_style_t style_btn_orange;
 static lv_style_t style_btn_dark_grey;
 static lv_style_t button_group_flex_style;
 
+static size_t utf8_length(const std::string& str) {
+    size_t length = 0;
+    for (size_t i = 0; i < str.length(); i++) {
+        if ((str[i] & 0xC0) != 0x80) {
+            length++;
+        }
+    }
+    return length;
+}
+
+static std::string trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, (last - first + 1));
+}
+
 PromptPanel::PromptPanel(KWebSocketClient &websocket_client, std::mutex &lock, lv_obj_t *parent, ExtruderPanel &ep)
     : NotifyConsumer(lock)
     , ws(websocket_client)
@@ -482,9 +499,8 @@ void PromptPanel::handle_macro_response(json &j) {
                 int index_label = command.find("button", 0) + strlen("button");
                 int index_first = command.find("|", index_label);
                 int index_second = command.find("|", index_first + 1);
-                int index_third = command.find("|", index_second + 1); // Найти третий разделитель
 
-                spdlog::debug("indexes: {} {} {} {}", index_label, index_first, index_second, index_third);
+                spdlog::debug("indexes: {} {} {}", index_label, index_first, index_second);
                 std::string prompt_footer_button = command.substr(index_label, index_first - index_label);
                 std::string prompt_button_command;
                 std::string prompt_button_type = "none";
@@ -492,17 +508,22 @@ void PromptPanel::handle_macro_response(json &j) {
 
                 if (index_second > 0) {
                     prompt_button_command = command.substr(index_first + 1, index_second - index_first - 1);
-                    if (index_third > 0) {
-                        prompt_button_type = command.substr(index_second + 1, index_third - index_second - 1);
-                        prompt_button_color = command.substr(index_third + 1);
-                    } else {
-                        prompt_button_type = command.substr(index_second + 1);
+
+                    prompt_button_type = trim(command.substr(index_second + 1));
+
+                    size_t extra_pipe = prompt_button_type.find('|');
+                    if (extra_pipe != std::string::npos) {
+                        prompt_button_type = trim(prompt_button_type.substr(0, extra_pipe));
+                    }
+
+                    if (prompt_button_type.length() == 6 && prompt_button_type.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos) {
+                        prompt_button_color = prompt_button_type;
                     }
                 } else {
                     prompt_button_command = command.substr(index_first + 1);
                 }
 
-                spdlog::debug("PROMPT_FOOTER_BUTTON: {} CMD: {}, type {}, color {}", prompt_footer_button, prompt_button_command, prompt_button_type, prompt_button_color);
+                spdlog::debug("PROMPT_FOOTER_BUTTON: {} CMD: {}, type {}", prompt_footer_button, prompt_button_command, prompt_button_type);
 
                 lv_obj_t *btn = NULL;
                 if (command.find("prompt_footer_button") == 0) {
@@ -515,8 +536,13 @@ void PromptPanel::handle_macro_response(json &j) {
                     }
                 }
                 if (btn) {
-                    lv_obj_set_size(btn, lv_pct(45), 32);
-                    lv_obj_set_style_max_width(btn, lv_pct(45), 0);
+                    if (utf8_length(prompt_footer_button) > 40) {
+                        lv_obj_set_size(btn, lv_pct(100), 32);
+                        lv_obj_set_style_max_width(btn, lv_pct(100), 0);
+                    } else {
+                        lv_obj_set_size(btn, lv_pct(45), 32);
+                        lv_obj_set_style_max_width(btn, lv_pct(45), 0);
+                    }
                     lv_obj_set_style_min_width(btn, 32, 0);
                     lv_obj_set_style_max_height(btn, max_h, 0);
                     lv_obj_set_style_min_height(btn, max_h, 0);
@@ -537,28 +563,24 @@ void PromptPanel::handle_macro_response(json &j) {
                     bool color_applied = false;
                     if (!prompt_button_color.empty()) {
                         std::string color_str = prompt_button_color;
-                        if (color_str.length() == 6 && color_str.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos) {
-                            try {
-                                uint32_t hex_color = std::stoul(color_str, nullptr, 16);
-                                lv_color_t btn_color = lv_color_hex(hex_color);
-                                lv_obj_set_style_bg_color(btn, btn_color, 0);
-                                lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+                        try {
+                            uint32_t hex_color = std::stoul(color_str, nullptr, 16);
+                            lv_color_t btn_color = lv_color_hex(hex_color);
+                            lv_obj_set_style_bg_color(btn, btn_color, 0);
+                            lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
 
-                                // Вычисление цвета текста на основе фона
-                                uint8_t r = (hex_color >> 16) & 0xFF;
-                                uint8_t g = (hex_color >> 8) & 0xFF;
-                                uint8_t b = hex_color & 0xFF;
-                                double gray = r * 0.299 + g * 0.587 + b * 0.114;
+                            // Вычисление цвета текста на основе фона
+                            uint8_t r = (hex_color >> 16) & 0xFF;
+                            uint8_t g = (hex_color >> 8) & 0xFF;
+                            uint8_t b = hex_color & 0xFF;
+                            double gray = r * 0.299 + g * 0.587 + b * 0.114;
 
-                                lv_color_t text_color = (gray > 186) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF);
-                                lv_obj_set_style_text_color(btn, text_color, 0);
+                            lv_color_t text_color = (gray > 186) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF);
+                            lv_obj_set_style_text_color(btn, text_color, 0);
 
-                                color_applied = true;
-                            } catch (...) {
-                                spdlog::debug("Недействительный цвет в третьем параметре: {}", color_str);
-                            }
-                        } else {
-                            spdlog::debug("Третий параметр не является HEX цветом: {}", prompt_button_color);
+                            color_applied = true;
+                        } catch (...) {
+                            spdlog::debug("Недействительный цвет в третьем параметре: {}", color_str);
                         }
                     }
 
