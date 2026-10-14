@@ -16,16 +16,6 @@ static lv_style_t style_btn_orange;
 static lv_style_t style_btn_dark_grey;
 static lv_style_t button_group_flex_style;
 
-static size_t utf8_length(const std::string& str) {
-    size_t length = 0;
-    for (size_t i = 0; i < str.length(); i++) {
-        if ((str[i] & 0xC0) != 0x80) {
-            length++;
-        }
-    }
-    return length;
-}
-
 static std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return "";
@@ -535,14 +525,11 @@ void PromptPanel::handle_macro_response(json &j) {
                         btn = lv_btn_create(button_group_cont);
                     }
                 }
+
                 if (btn) {
-                    if (utf8_length(prompt_footer_button) > 40) {
-                        lv_obj_set_size(btn, lv_pct(100), 32);
-                        lv_obj_set_style_max_width(btn, lv_pct(100), 0);
-                    } else {
-                        lv_obj_set_size(btn, lv_pct(45), 32);
-                        lv_obj_set_style_max_width(btn, lv_pct(45), 0);
-                    }
+                    const bool is_footer = (command.find("prompt_footer_button") == 0);
+
+                    lv_obj_set_style_pad_all(btn, 2, 0);
                     lv_obj_set_style_min_width(btn, 32, 0);
                     lv_obj_set_style_max_height(btn, max_h, 0);
                     lv_obj_set_style_min_height(btn, max_h, 0);
@@ -556,8 +543,42 @@ void PromptPanel::handle_macro_response(json &j) {
                     lv_obj_add_flag(command_label, LV_OBJ_FLAG_HIDDEN);
                     lv_label_set_text(label, prompt_footer_button.c_str());
                     lv_label_set_text(command_label, prompt_button_command.c_str());
-                    lv_obj_set_style_pad_all(btn, 2, 0);
-                    // lv_obj_set_style_max_width(label, lv_pct(45), 0);
+
+                    // --- измеряем реальную ширину текста ---
+                    lv_obj_t *parent = lv_obj_get_parent(btn);
+                    lv_obj_update_layout(parent);                       // чтобы получить актуальную ширину родителя
+                    lv_coord_t parent_w = lv_obj_get_content_width(parent);
+
+                    const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+                    lv_coord_t letter_space = lv_obj_get_style_text_letter_space(label, LV_PART_MAIN);
+                    lv_point_t txt_size;
+                    lv_txt_get_size(&txt_size, prompt_footer_button.c_str(), font, letter_space, 0,
+                                    LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+                    const lv_coord_t pad = 2 * 2 + 4;                   // padding кнопки + небольшой запас
+                    const lv_coord_t need_w = txt_size.x + pad;
+                    const lv_coord_t half_w = parent_w * 45 / 100;
+
+                    bool full_width = false;
+                    if (!is_footer && need_w > half_w) {
+                        full_width = true;                              // не влезает в 45% -> растягиваем на 100%
+                    }
+
+                    if (full_width) {
+                        lv_obj_set_size(btn, lv_pct(100), 32);
+                        lv_obj_set_style_max_width(btn, lv_pct(100), 0);
+                    } else {
+                        lv_obj_set_size(btn, lv_pct(45), 32);
+                        lv_obj_set_style_max_width(btn, lv_pct(45), 0);
+                    }
+
+                    lv_coord_t avail_w = full_width ? parent_w : half_w;
+                    if (need_w > avail_w) {
+                        // не влезает даже так -> прокрутка текста внутри кнопки
+                        lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+                        lv_obj_set_width(label, lv_pct(100));
+                        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+                    }
                     lv_obj_center(label);
 
                     bool color_applied = false;
